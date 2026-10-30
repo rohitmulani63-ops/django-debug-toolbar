@@ -1,0 +1,55 @@
+name: ci-check-relint (temporary, fork only)
+
+on:
+  push:
+    branches: [ci-check-relint]
+
+permissions:
+  contents: read
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Install pre-commit
+        run: python -m pip install pre-commit
+      - name: All hooks on all files, like pre-commit.ci
+        run: pre-commit run --all-files --show-diff-on-failure
+      - name: relint flags physical CSS
+        run: |
+          css=debug_toolbar/static/debug_toolbar/css/toolbar.css
+          cp "$css" "$RUNNER_TEMP/toolbar.css"
+          for line in \
+            '#djDebug .a { margin-left: 1px; }' \
+            '#djDebug .b { text-align: right; }' \
+            '#djDebug .c { padding: 0 10px 0 0; }' \
+            '#djDebug .d { border-top-left-radius: 4px; }'
+          do
+            cp "$RUNNER_TEMP/toolbar.css" "$css"
+            printf '%s\n' "$line" >> "$css"
+            if out=$(pre-commit run relint --files "$css" 2>&1); then
+              echo "relint missed: $line"
+              exit 1
+            fi
+            echo "$out"
+            if ! grep -q "line=$(wc -l < "$css")," <<< "$out"; then
+              echo "relint failed without flagging the added line: $line"
+              exit 1
+            fi
+          done
+          cp "$RUNNER_TEMP/toolbar.css" "$css"
+      - name: relint accepts logical CSS and opt-outs
+        run: |
+          css=debug_toolbar/static/debug_toolbar/css/toolbar.css
+          printf '%s\n' \
+            '#djDebug .a { margin-inline-start: 1px; }' \
+            '#djDebug .b { right: 0; /* rtl-ok */ }' \
+            '#djDebug .c { padding: 0 5px 0 5px; }' \
+            '#djDebug .left:hover { text-align: start; }' >> "$css"
+          pre-commit run relint --files "$css"
